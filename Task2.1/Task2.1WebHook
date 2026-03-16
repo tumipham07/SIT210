@@ -1,0 +1,106 @@
+#include <WiFiNINA.h>
+#include <DHT.h>
+#include <BH1750.h>
+#include <Wire.h>
+#include "ThingSpeak.h"
+
+// connect wifi
+char ssid[] = "NetComm 2248";  // network SSID (name)
+char pass[] = "ASHcSvdYSt377ed8";  //  network password 
+
+int status = WL_IDLE_STATUS;      // the Wi-Fi radio's status
+
+// ThingSpeak Settings
+WiFiClient client;
+unsigned long Channel_ID = 3299977;
+const char* API_Key = "HEDHJ4TWLGL04O1Q";
+
+// Sensor objects
+BH1750 lightMeter;
+DHT dht(2, DHT22); // DHT22 connected to pin 2
+
+// Timing variables 
+unsigned long previousMillisSensor = 0;
+const long sensorInterval = 20000; // 20 seconds for sensor reading and ThingSpeak update
+
+void setup() {
+  // Initialize serial and wait for port to open
+  Serial.begin(9600);
+  while (!Serial);
+
+  // Initialize sensors
+  Wire.begin();
+  lightMeter.begin();
+  dht.begin();
+
+  // Initialize ThingSpeak
+  ThingSpeak.begin(client);
+
+  // connect to Wi-Fi network:
+  while (status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to network: ");
+    Serial.println(ssid);
+
+    status = WiFi.begin(ssid, pass);
+
+    // wait 10 seconds for connection:
+    delay(10000);
+  }
+
+  // print out the data
+  Serial.println("You're connected to the network");
+  Serial.println("---------------------------------------");
+  // print board's IP address:
+  IPAddress ip = WiFi.localIP();
+  Serial.print("IP Address: ");
+  Serial.println(ip);
+  Serial.println("---------------------------------------");
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  // Check if it's time to read sensors and update ThingSpeak
+  if (currentMillis - previousMillisSensor >= sensorInterval) {
+    previousMillisSensor = currentMillis;
+
+    // Read sensors
+    float temperature = dht.readTemperature();
+    float lux = lightMeter.readLightLevel();
+
+    // Check if reads are valid
+    if (isnan(temperature)) {
+      Serial.println("Failed to read from DHT sensor!");
+      return; 
+    }
+
+    // Print readings
+    Serial.print("Temperature: ");
+    Serial.print(temperature);
+    Serial.print(" °C, Light: ");
+    Serial.print(lux);
+    Serial.println(" lx");
+
+    // Send to ThingSpeak
+    ThingSpeak.setField(1, temperature);
+    ThingSpeak.setField(2, lux);
+
+    int httpCode = ThingSpeak.writeFields(Channel_ID, API_Key);
+    if (httpCode == 200) { //HTTP status code 200 means OK
+      Serial.println(" Data sent to ThingSpeak successfully!");
+    } else {
+      Serial.println(" Problem sending to ThingSpeak. Error code: " + String(httpCode));
+    }
+
+    // Print network info periodically 
+    Serial.println("Board Information:");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("SSID: ");
+    Serial.println(WiFi.SSID());
+    long rssi = WiFi.RSSI();
+    Serial.print("Signal strength (RSSI):");
+    Serial.println(rssi);
+    Serial.println("---------------------------------------");
+  }
+}
