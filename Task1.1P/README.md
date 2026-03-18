@@ -9,16 +9,9 @@ When the button is pressed, both LEDs turns on. After 30 seconds and 60 seconds,
 the porch light and hallway light turns off respectively. 
 
 CODE EXPLAINATION:
-First, we defines digital pins for all the accessories, including button (pin 4),
-porch light (red LED, pin 2), hallway light (blue LED, pin 3), and defines a 
-variable names buttonState to read the button status. Then, the code is 
-structured into two main parts: setup() and loop(). The setup() function is used
-for code that only need to run once at the start, then here, we initialize
-pin modes with LED pins as OUTPUT and button pin as INPUT_PULLUP. This is simply because 
-by setting the LEDs pin as OUTPUT, the Arduino sends a signal to controlled the LEDs 
-on and off while setting the button pin as INPUT, the Arduino receives a signal 
-from the outside world. Besides, loop() function gives continuous execution, then 
-it contains the main logic of the program, including read button state by using digitalRead,
-check condition if the button is pressed (LOW), the lights turn on, if not, the lights
-turn of by using digitalWrite. In this program, we also use delay to keep the lights
-turn on after 30 and 60 seconds.
+First, we define digital pins for all the accessories, including the button (pin 4), porch light (red LED, pin 2), and hallway light (blue LED, pin 3). Then, we also declare variables including buttonState to read the button status, porchTimer and hallwayTimer to track time using the millis() function, and porchState and hallwayState as boolean variables to track whether each light is currently on or off.
+
+Next, The code is structured into two main parts: setup() and loop(). For the setup() function, it runs once at the start of the program. Here, we initialize pin modes with LED pins as OUTPUT and the button pin as INPUT_PULLUP. By setting the LED pins as OUTPUT, the Arduino sends signals to control the LEDs turning on and off. Setting the button pin as INPUT_PULLUP enables the internal pull-up resistor, so the Arduino receives a HIGH signal when the button is not pressed and a LOW signal when it is pressed. We also initialize both LEDs to be turned off at the start using digitalWrite(porchPin, LOW) and digitalWrite(hallwayPin, LOW).
+ For the loop() function, it runs continuously and contains the main logic of the program. It reads the button state using digitalRead(buttonPin) and checks if the button is pressed (LOW). When the button is pressed, both LEDs turn on using digitalWrite(), the state variables (porchState and hallwayState) are set to true to indicate the lights are on, and timers are recorded using millis().
+
+Instead of using delay(), which would block the program from doing anything else, this code uses millis(). After the button press logic, the loop() calls two custom functions: porchLight() and hallwayLight(). The porchLight() function checks if the porch light is on (porchState is true) AND if 30 seconds (30000 milliseconds) have passed since the porch timer was set. If both conditions are true, it turns off the porch light and updates porchState to false. It is similar to the hallwayLight() function, checking if 60 seconds (60000 milliseconds) have passed before turning off the hallway light.
