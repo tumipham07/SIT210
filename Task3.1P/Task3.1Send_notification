@@ -1,0 +1,75 @@
+#include <WiFiNINA.h>
+#include <Wire.h>
+#include <BH1750.h>
+
+char ssid[] = "lrc";
+char pass[] = "lettyletty";
+char HOST_NAME[] = "maker.ifttt.com"; // IFTTT Webhooks API server 
+String key = "cE4wgF6MCP5rok5Li9E_jl";
+
+BH1750 sensor; // Create BH1750 sensor object for light measurements
+bool lightOn = false; // Track current light state
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  sensor.begin();
+  connectWiFi();
+  //
+  lightOn = (sensor.readLightLevel() > 300);
+}
+
+void loop() {
+  float lux = sensor.readLightLevel();
+  // Print current light level
+  Serial.print("Light level: ");
+  Serial.print(lux);
+  Serial.println(" lx");
+
+  light(lux);
+  delay(3000);
+}
+
+void connectWiFi() {
+  Serial.print("Connecting to WiFi");
+  while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
+    Serial.print(".");
+    delay(2000);
+  }
+  Serial.println(" Wifi Connected!");
+}
+
+//Send notification to email
+void sendNotification(String event, float lux) {
+  WiFiClient client; // Create WiFi client object for HTTP request
+  // Construct the IFTTT Webhooks request URL
+  // Format: /trigger/{EVENT_NAME}/with/key/{YOUR_KEY}?value1={LUX_VALUE}
+  String request = "/trigger/" + event + "/with/key/" + key + "?value1=" + lux;
+  
+  // Attempt to connect to IFTTT server on port 80 (HTTP)
+  if (client.connect(HOST_NAME, 80)) {
+    client.println("GET " + request + " HTTP/1.1");
+    client.println("Host: maker.ifttt.com");
+    client.println("Connection: close");
+    client.println();
+    Serial.println("Notification sent: " + event);
+    delay(5000);
+  } else {
+    Serial.println("Failed to reach IFTTT");
+  }
+
+  client.stop();
+}
+//check the light level if it get the threshold or not
+void light(float lux) {
+  if (!lightOn && lux > 300) {
+    lightOn = true;
+    sendNotification("light_on", lux);
+  }
+
+  if (lightOn && lux <= 300) {
+    lightOn = false;
+    sendNotification("light_off", lux);
+  }
+}
+
