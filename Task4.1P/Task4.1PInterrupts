@@ -1,0 +1,145 @@
+#include <Wire.h>
+#include <BH1750.h>
+
+
+// Pin definitions
+const int pirPin     = 2;   // PIR sensor
+const int buttonPin  = 3;   // push button 
+const int porchPin   = 4;   // porch LED
+const int hallwayPin = 5;   // hallway LED
+
+// Timing
+const unsigned long porchDuration   = 30000; // 30 sec
+const unsigned long hallwayDuration = 60000; // 60 sec
+
+
+// Light threshold (adjust)
+const float darkThreshold = 50.0;
+
+BH1750 lightMeter;
+
+
+// Interrupt flags
+volatile bool pirTriggered = false;
+volatile bool buttonTriggered = false;
+
+
+// Light states
+bool porchOn = false;
+bool hallwayOn = false;
+
+unsigned long porchStartTime = 0;
+unsigned long hallwayStartTime = 0;
+
+
+// Debounce
+unsigned long lastButtonInterruptTime = 0;
+const unsigned long debounceDelay = 200;
+
+// ISR functions
+void pirISR() {
+  pirTriggered = true;
+}
+
+void buttonISR() {
+  buttonTriggered = true;
+}
+
+void setup() {
+  pinMode(pirPin, INPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(porchPin, OUTPUT);
+  pinMode(hallwayPin, OUTPUT);
+
+  digitalWrite(porchPin, LOW);
+  digitalWrite(hallwayPin, LOW);
+
+  Serial.begin(9600);
+  while (!Serial);
+  Serial.println("System ready. Waiting for PIR to stabilise...");
+  delay(60000);  // PIR 
+  Serial.println("System active.");
+
+  Wire.begin();
+  lightMeter.begin();
+
+  attachInterrupt(digitalPinToInterrupt(pirPin), pirISR, RISING);
+  attachInterrupt(digitalPinToInterrupt(buttonPin), buttonISR, FALLING);
+
+
+}
+
+void loop() {
+  motionEvent();
+  buttonEvent();
+  updatePorchLight();
+  updateHallwayLight();
+}
+
+// Handle PIR motion
+void motionEvent() {
+  if (pirTriggered) {
+    pirTriggered = false;
+
+    float lux = lightMeter.readLightLevel();
+
+    Serial.print("Motion detected. Light level: ");
+    Serial.print(lux);
+    Serial.println(" lux");
+
+    if (lux < darkThreshold) {
+      turnLightsOn("Motion + dark");
+    } else {
+      Serial.println("Too bright: lights OFF");
+    }
+  }
+}
+
+// Handle button
+void buttonEvent() {
+  if (buttonTriggered) {
+    buttonTriggered = false;
+
+    unsigned long currentTime = millis();
+
+    if (currentTime - lastButtonInterruptTime > debounceDelay) {
+      lastButtonInterruptTime = currentTime;
+      turnLightsOn("Button pressed:");
+    }
+  }
+}
+
+
+// Turn lights ON
+void turnLightsOn(const char* reason) {
+  digitalWrite(porchPin, HIGH);
+  digitalWrite(hallwayPin, HIGH);
+
+  porchOn = true;
+  hallwayOn = true;
+
+  porchStartTime = millis();
+  hallwayStartTime = millis();
+
+  Serial.print(reason);
+  Serial.println(" Lights ON");
+}
+
+// Porch OFF after 30s
+void updatePorchLight() {
+  if (porchOn && millis() - porchStartTime >= porchDuration) {
+    digitalWrite(porchPin, LOW);
+    porchOn = false;
+    Serial.println("Porch light OFF");
+  }
+}
+
+
+// Hallway OFF after 60s
+void updateHallwayLight() {
+  if (hallwayOn && millis() - hallwayStartTime >= hallwayDuration) {
+    digitalWrite(hallwayPin, LOW);
+    hallwayOn = false;
+    Serial.println("Hallway light OFF");
+  }
+}
