@@ -1,0 +1,100 @@
+# Import libraries
+# tkinter is used to create the GUI (buttons, window)
+# RPi.GPIO is used to control Raspberry Pi pins (LEDs)
+import tkinter as tk
+import RPi.GPIO as GPIO
+
+#GPIO setup
+GPIO.setmode(GPIO.BCM)
+
+#assign GPIO pins for each LED
+living_led = 23 #blue
+bathroom_led = 24 #yellow
+closet_led = 25 #green
+
+#set up each pin as output
+GPIO.setup(living_led, GPIO.OUT)
+GPIO.setup(bathroom_led, GPIO.OUT)
+GPIO.setup(closet_led, GPIO.OUT)
+
+#set all leds turn off at the beginning
+GPIO.output(living_led, GPIO.LOW)
+GPIO.output(bathroom_led, GPIO.LOW)
+GPIO.output(closet_led, GPIO.LOW)
+
+#Function to turn on the led after clicking the button
+def select_room():
+    room = room_var.get()
+
+    # turn all LEDs off first
+    #this is important as with this, the system turns them off again each time a new selection is made
+    GPIO.output(living_led, GPIO.LOW)
+    GPIO.output(bathroom_led, GPIO.LOW)
+    GPIO.output(closet_led, GPIO.LOW)
+
+    # turn on only selected LED
+    if room == "Living Room":
+        GPIO.output(living_led, GPIO.HIGH)
+    elif room == "Bathroom":
+        GPIO.output(bathroom_led, GPIO.HIGH)
+    elif room == "Closet":
+        GPIO.output(closet_led, GPIO.HIGH)
+
+#function to exit the program when choosing exit
+def exit_program():
+    GPIO.output(living_led, GPIO.LOW)
+    GPIO.output(bathroom_led, GPIO.LOW)
+    GPIO.output(closet_led, GPIO.LOW)
+    GPIO.cleanup() #reset all GPIO pins
+    window.destroy() #close the GUI window
+
+# GUI setup
+window = tk.Tk()
+window.title("Light Control GUI")
+window.geometry("300x220")
+
+#instructions
+title_label = tk.Label(window, text="Select a room light", font=("Arial", 14))
+title_label.pack(pady=10)
+
+#variable to store which button is selected
+room_var = tk.StringVar()
+room_var.set("") #no selection as default
+
+#each button represent one room
+#when clicked it calls select room
+living_button = tk.Radiobutton(
+    window,
+    text="Living Room",
+    variable=room_var,
+    value="Living Room",
+    command=select_room
+)
+living_button.pack(anchor="w", padx=30, pady=5)
+# Displays the radio button in the window,
+# aligns it to the left side (west),
+# adds horizontal space (padx) and vertical space (pady)
+
+bathroom_button = tk.Radiobutton(
+    window,
+    text="Bathroom",
+    variable=room_var,
+    value="Bathroom",
+    command=select_room
+)
+bathroom_button.pack(anchor="w", padx=30, pady=5)
+
+closet_button = tk.Radiobutton(
+    window,
+    text="Closet",
+    variable=room_var,
+    value="Closet",
+    command=select_room
+)
+closet_button.pack(anchor="w", padx=30, pady=5)
+
+#close the program safely
+exit_button = tk.Button(window, text="Exit", command=exit_program)
+exit_button.pack(pady=20)
+
+window.mainloop() #keeps the window open and responsive
