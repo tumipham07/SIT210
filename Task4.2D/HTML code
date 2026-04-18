@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Light Control</title>
+</head>
+<body>
+  <h2>Linda's Home Lights</h2>
+
+  <button onclick="sendCommand('living')">Living Room</button>
+  <button onclick="sendCommand('bathroom')">Bathroom</button>
+  <button onclick="sendCommand('closet')">Closet</button>
+
+  <script>
+    function sendCommand(room) {
+      fetch("http://192.168.20.10/" + room);
+    }
+  </script>
+</body>
+</html>
