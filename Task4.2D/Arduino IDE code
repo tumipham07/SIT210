@@ -1,0 +1,93 @@
+#include <WiFiNINA.h>
+
+//define pin numbers
+int livingLED = 2;
+int bathroomLED = 3;
+int closetLED = 4;
+
+char ssid[] = "NetComm 2248";
+char pass[] = "ASHcSvdYSt377ed8";
+
+WiFiServer server(80);
+
+void setup() {
+  //set led pin as output
+  pinMode(livingLED, OUTPUT);
+  pinMode(bathroomLED, OUTPUT);
+  pinMode(closetLED, OUTPUT);
+
+  Serial.begin(9600);
+
+//connect to Wifi
+  while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
+    Serial.println("Connecting to WiFi...");
+    delay(3000);
+  }
+
+  Serial.println("Connected to WiFi");
+  Serial.print("IP Address: "); //check IP address, where HTML page will send requests to
+  Serial.println(WiFi.localIP());
+
+  server.begin();
+}
+//function to check input, read current state of the led 
+//then write the opposite value for the led
+void controlLight(String room) {
+  if (room == "living room") {
+    digitalWrite(livingLED, !digitalRead(livingLED));
+    Serial.println("Toggled living room LED");
+  }
+  else if (room == "bathroom") {
+    digitalWrite(bathroomLED, !digitalRead(bathroomLED));
+    Serial.println("Toggled bathroom LED");
+  }
+  else if (room == "closet") {
+    digitalWrite(closetLED, !digitalRead(closetLED));
+    Serial.println("Toggled closet LED");
+  }
+  else {
+    Serial.println("Invalid room name");
+  }
+}
+
+void loop() {
+  //Check if any client (browser) is trying to connect to Arduino
+  WiFiClient client = server.available();
+
+//if a client is connected
+  if (client) {
+    // Read the first line of the HTTP request ("GET /living HTTP/1.1")
+    String request = client.readStringUntil('\r');
+
+    // Clear the rest of the incoming data
+    client.flush();
+// Print the request to Serial Monitor
+    Serial.println(request);
+
+// Check if the request contains "/living"
+    if (request.indexOf("/living") != -1) {
+      // Call function to toggle living room LED
+      controlLight("living room");
+    }
+     // Check if the request contains "/bathroom"
+    else if (request.indexOf("/bathroom") != -1) {
+      // Toggle bathroom LED
+      controlLight("bathroom");
+    }
+    //// Check if the request contains "/closet"
+    else if (request.indexOf("/closet") != -1) {
+      // Toggle closet LED
+      controlLight("closet");
+    }
+    // Send HTTP response header (status OK)
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-type:text/html");// Tell browser we are sending HTML content
+    client.println("Connection: close");// Close connection after response
+    client.println();
+    client.println("<html><body><h2>Command received</h2></body></html>");// Send simple HTML page back to browser
+    client.println();
+
+    delay(1);// Small delay to ensure data is sent properly
+    client.stop();// Close the connection with the client
+  }
+}
