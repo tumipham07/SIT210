@@ -1,0 +1,104 @@
+# Import libraries
+# tkinter is used to create the GUI
+# RPi.GPIO is used to control Raspberry Pi GPIO pins
+import tkinter as tk
+import RPi.GPIO as GPIO
+
+# GPIO setup
+GPIO.setmode(GPIO.BCM)
+
+# Assign GPIO pins
+living_led = 18      # PWM pin for living room LED
+bathroom_led = 24    # Normal ON/OFF LED
+closet_led = 25      # Normal ON/OFF LED
+
+# Set up each pin as output
+GPIO.setup(living_led, GPIO.OUT)
+GPIO.setup(bathroom_led, GPIO.OUT)
+GPIO.setup(closet_led, GPIO.OUT)
+
+# Turn bathroom and closet LEDs off at the beginning
+GPIO.output(bathroom_led, GPIO.LOW)
+GPIO.output(closet_led, GPIO.LOW)
+
+# Create PWM object for living room LED
+pwm = GPIO.PWM(living_led, 1000)  # 1000 Hz frequency, how many times per second the led turn on and off
+pwm.start(0)  # Start with LED off
+
+# bool variables to track button states for bathroom and closet
+bathroom_on = False
+closet_on = False
+
+# Function to change living room brightness using slider
+def change_brightness(value):
+    pwm.ChangeDutyCycle(int(value))
+
+# Function to toggle bathroom light ON/OFF
+def toggle_bathroom():
+    global bathroom_on #so that i can change the value of the variable from outside the function
+    bathroom_on = not bathroom_on #change the status of the led to the opposite value
+                                  #if turning on -> turn it off, if turning off -> turn it on
+
+    if bathroom_on:
+        GPIO.output(bathroom_led, GPIO.HIGH)
+        bathroom_button.config(text="Bathroom: ON")
+    else:
+        GPIO.output(bathroom_led, GPIO.LOW)
+        bathroom_button.config(text="Bathroom: OFF")
+
+# Function to toggle closet light ON/OFF
+def toggle_closet():
+    global closet_on
+    closet_on = not closet_on
+
+    if closet_on:
+        GPIO.output(closet_led, GPIO.HIGH)
+        closet_button.config(text="Closet: ON")
+    else:
+        GPIO.output(closet_led, GPIO.LOW)
+        closet_button.config(text="Closet: OFF")
+
+# Function to exit program safely
+def exit_program():
+    pwm.stop()                         # Stop PWM
+    GPIO.output(living_led, GPIO.LOW)  # Turn off LED
+    GPIO.output(bathroom_led, GPIO.LOW)
+    GPIO.output(closet_led, GPIO.LOW)
+    GPIO.cleanup()                     # Reset all GPIO pins
+    window.destroy()                   # Close GUI window
+
+# GUI setup
+window = tk.Tk()
+window.title("Home Light Control GUI")
+window.geometry("350x320")
+
+# Title
+title_label = tk.Label(window, text="Linda's Home Light Control", font=("Arial", 14))
+title_label.pack(pady=10)
+
+# Living room slider section
+brightness_slider = tk.Scale(
+    window,
+    from_=0,
+    to=100,
+    orient="horizontal",
+    length=200,
+    label="Living Room Brightness Level",
+    command=change_brightness
+)
+brightness_slider.pack(pady=10)
+
+# Bathroom button
+bathroom_button = tk.Button(window, text="Bathroom: OFF", width=20, command=toggle_bathroom)
+bathroom_button.pack(pady=8)
+
+# Closet button
+closet_button = tk.Button(window, text="Closet: OFF", width=20, command=toggle_closet)
+closet_button.pack(pady=8)
+
+# Exit button to close the program safely
+exit_button = tk.Button(window, text="Exit", width=20, command=exit_program)
+exit_button.pack(pady=20)
+
+# Keep window open
+window.mainloop()
