@@ -1,0 +1,176 @@
+# Import asyncio for running Bluetooth tasks asynchronously
+import asyncio
+
+# Import speech_recognition for converting voice input into text
+import speech_recognition as sr
+
+# Import Bleak for Bluetooth Low Energy communication
+from bleak import BleakScanner, BleakClient
+
+
+# This name must match the Arduino BLE name:
+# BLE.setLocalName("NanoVoiceLight");
+DEVICE_NAME = "NanoVoiceLight"
+
+# This UUID must match the BLE characteristic UUID in the Arduino code
+CHARACTERISTIC_UUID = "19B10001-E8F2-537E-4F6C-D104768A1214"
+
+
+# Create a speech recognizer object
+recognizer = sr.Recognizer()
+
+
+# This function scans for the Arduino Nano 33 IoT using Bluetooth Low Energy
+async def find_arduino():
+    print("Scanning for Arduino...")
+
+    # Scan nearby BLE devices for 8 seconds
+    devices = await BleakScanner.discover(timeout=8)
+
+    # Check each discovered device
+    for device in devices:
+        print(device.name, device.address)
+
+        # If the Arduino name is found, return its Bluetooth address
+        if device.name == DEVICE_NAME:
+            print("Found Arduino:", device.address)
+            return device.address
+
+    # If Arduino is not found, return nothing
+    print("Arduino not found. Please check Arduino power and BLE code.")
+    return None
+
+
+# This function listens to the microphone and converts voice into text
+def listen_for_voice():
+    with sr.Microphone() as source:
+        print("\nSay a command now...")
+
+        # Adjust for background noise before listening
+        recognizer.adjust_for_ambient_noise(source, duration=1)
+
+        try:
+            # Wait up to 10 seconds for the user to start speaking
+            # Stop listening after 5 seconds of speech
+            audio = recognizer.listen(source, timeout=10, phrase_time_limit=5)
+
+        except sr.WaitTimeoutError:
+            # If no voice is detected, return empty text instead of crashing
+            print("No voice detected. Please try again.")
+            return ""
+
+    try:
+        # Convert audio to text using Google speech recognition
+        text = recognizer.recognize_google(audio).lower()
+
+        print("You said:", text)
+        return text
+
+    except sr.UnknownValueError:
+        # Voice was detected, but the words were not understood
+        print("Could not understand the voice.")
+        return ""
+
+    except sr.RequestError:
+        # Internet or speech recognition service error
+        print("Speech recognition service error.")
+        return ""
+
+
+# This function converts natural voice text into simple Arduino commands
+def convert_to_command(text):
+
+    # Bathroom light commands
+    if "bathroom light on" in text or "turn on bathroom light" in text:
+        return "bathroom_on"
+
+    elif "bathroom light off" in text or "turn off bathroom light" in text:
+        return "bathroom_off"
+
+    # Hallway light commands
+    elif "hallway light on" in text or "turn on hallway light" in text:
+        return "hallway_on"
+
+    elif "hallway light off" in text or "turn off hallway light" in text:
+        return "hallway_off"
+
+    # Both lights commands
+    elif "lights on" in text or "turn on lights" in text:
+        return "lights_on"
+
+    elif "lights off" in text or "turn off lights" in text:
+        return "lights_off"
+
+    # Fan commands
+    elif "fan on" in text or "turn on fan" in text:
+        return "fan_on"
+
+    elif "fan off" in text or "turn off fan" in text:
+        return "fan_off"
+
+    # All system commands
+    elif "all on" in text or "turn on everything" in text:
+        return "all_on"
+
+    elif "all off" in text or "turn off everything" in text:
+        return "all_off"
+
+    # If the sentence does not match any command
+    else:
+        return ""
+
+
+# This function sends a command to Arduino through BLE
+async def send_command(client, command):
+    try:
+        await client.write_gatt_char(
+            CHARACTERISTIC_UUID,
+            command.encode()
+        )
+
+        print("Sent command:", command)
+
+    except Exception as error:
+        # This prevents the program from crashing if Bluetooth sending fails
+        print("Could not send command to Arduino.")
+        print("Error:", error)
+
+
+# Main program
+async def main():
+
+    # Find Arduino Bluetooth address
+    arduino_address = await find_arduino()
+
+    # Stop the program if Arduino cannot be found
+    if arduino_address is None:
+        return
+
+    try:
+        # Connect to Arduino
+        async with BleakClient(arduino_address) as client:
+            print("Connected to Arduino.")
+
+            # Keep listening for voice commands
+            while True:
+                voice_text = listen_for_voice()
+
+                command = convert_to_command(voice_text)
+
+                if command != "":
+                    await send_command(client, command)
+                else:
+                    print("No valid command detected.")
+
+    except KeyboardInterrupt:
+        # This message appears when you stop the program with Ctrl + C
+        print("\nProgram stopped by user.")
+
+    except Exception as error:
+        # General error handler for Bluetooth or connection issues
+        print("Program stopped because of an error.")
+        print("Error:", error)
+
+
+# Start the program
+asyncio.run(main())
