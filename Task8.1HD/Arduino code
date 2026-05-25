@@ -1,0 +1,254 @@
+#include <ArduinoBLE.h>
+#include <Wire.h>
+#include <BH1750.h>
+
+// Create BH1750 light sensor object
+BH1750 lightMeter;
+
+// Output pins
+const int bathroomLED = 2;   // Bathroom light LED
+const int hallwayLED = 3;    // Hallway light LED
+const int fanLED = 4;        // Exhaust fan LED
+
+// Boolean state variables
+// false = OFF, true = ON
+bool bathroomLightState = false;
+bool hallwayLightState = false;
+bool fanState = false;
+
+// If lux is below this value, the system treats the room as dark
+float darkThreshold = 50.0;
+
+// Custom BLE service and characteristic UUIDs
+BLEService voiceLightService("19B10000-E8F2-537E-4F6C-D104768A1214");
+BLEStringCharacteristic commandCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLEWrite, 30);
+
+void setup() {
+  Serial.begin(9600);
+  delay(3000);
+
+  // Set all LED pins as outputs
+  pinMode(bathroomLED, OUTPUT);
+  pinMode(hallwayLED, OUTPUT);
+  pinMode(fanLED, OUTPUT);
+
+  // Make sure all outputs start OFF
+  digitalWrite(bathroomLED, LOW);
+  digitalWrite(hallwayLED, LOW);
+  digitalWrite(fanLED, LOW);
+
+  bathroomLightState = false;
+  hallwayLightState = false;
+  fanState = false;
+
+  // Start I2C communication for BH1750
+  Wire.begin();
+
+  // Start BH1750 light sensor
+  if (lightMeter.begin()) {
+    Serial.println("BH1750 started successfully.");
+  } else {
+    Serial.println("BH1750 error. Please check wiring.");
+  }
+
+  // Start BLE
+  Serial.println("Starting BLE...");
+
+  if (!BLE.begin()) {
+    Serial.println("BLE failed to start.");
+    while (1);
+  }
+
+  // Bluetooth name shown to Raspberry Pi
+  BLE.setLocalName("LindaVoice");
+
+  // Add BLE service and characteristic
+  BLE.setAdvertisedService(voiceLightService);
+  voiceLightService.addCharacteristic(commandCharacteristic);
+  BLE.addService(voiceLightService);
+
+  // Start advertising so Raspberry Pi can find the Arduino
+  BLE.advertise();
+
+  Serial.println("BLE active. Waiting for Raspberry Pi connection...");
+}
+
+void loop() {
+  // Wait for Raspberry Pi to connect
+  BLEDevice central = BLE.central();
+
+  if (central) {
+    Serial.print("Connected to: ");
+    Serial.println(central.address());
+
+    // Keep checking while Raspberry Pi is connected
+    while (central.connected()) {
+      // Check if Raspberry Pi sends a command
+      if (commandCharacteristic.written()) {
+        String command = commandCharacteristic.value();
+        command.toLowerCase();
+
+        Serial.print("Received command: ");
+        Serial.println(command);
+
+        handleCommand(command);
+      }
+    }
+
+    Serial.println("Raspberry Pi disconnected.");
+  }
+}
+
+// This function checks the received command and calls the correct action
+void handleCommand(String command) {
+  if (command == "bathroom_on") {
+    turnBathroomLightOn();
+  }
+
+  else if (command == "bathroom_off") {
+    turnBathroomLightOff();
+  }
+
+  else if (command == "hallway_on") {
+    turnHallwayLightOn();
+  }
+
+  else if (command == "hallway_off") {
+    turnHallwayLightOff();
+  }
+
+  else if (command == "lights_on") {
+    turnBathroomLightOn();
+    turnHallwayLightOn();
+  }
+
+  else if (command == "lights_off") {
+    turnBathroomLightOff();
+    turnHallwayLightOff();
+  }
+
+  else if (command == "fan_on") {
+    turnFanOn();
+  }
+
+  else if (command == "fan_off") {
+    turnFanOff();
+  }
+
+  else if (command == "all_on") {
+    turnBathroomLightOn();
+    turnHallwayLightOn();
+    turnFanOn();
+  }
+
+  else if (command == "all_off") {
+    turnBathroomLightOff();
+    turnHallwayLightOff();
+    turnFanOff();
+  }
+
+  else {
+    Serial.println("Unknown command received.");
+  }
+}
+
+// Read the BH1750 light sensor and return the lux value
+float getLightLevel() {
+  float lux = lightMeter.readLightLevel();
+
+  Serial.print("Current light level: ");
+  Serial.print(lux);
+  Serial.println(" lux");
+
+  return lux;
+}
+
+// Return true if the room is dark enough
+bool isDarkEnough() {
+  float lux = getLightLevel();
+  return lux < darkThreshold;
+}
+
+// Bathroom light ON function
+void turnBathroomLightOn() {
+  if (bathroomLightState == true) {
+    Serial.println("Bathroom light is already ON.");
+    return;
+  }
+
+  if (isDarkEnough()) {
+    digitalWrite(bathroomLED, HIGH);
+    bathroomLightState = true;
+    Serial.println("Bathroom light turned ON.");
+  } else {
+    digitalWrite(bathroomLED, LOW);
+    bathroomLightState = false;
+    Serial.println("Room is bright. Bathroom light remains OFF.");
+  }
+}
+
+// Bathroom light OFF function
+void turnBathroomLightOff() {
+  if (bathroomLightState == false) {
+    Serial.println("Bathroom light is already OFF.");
+    return;
+  }
+
+  digitalWrite(bathroomLED, LOW);
+  bathroomLightState = false;
+  Serial.println("Bathroom light turned OFF.");
+}
+
+// Hallway light ON function
+void turnHallwayLightOn() {
+  if (hallwayLightState == true) {
+    Serial.println("Hallway light is already ON.");
+    return;
+  }
+
+  if (isDarkEnough()) {
+    digitalWrite(hallwayLED, HIGH);
+    hallwayLightState = true;
+    Serial.println("Hallway light turned ON.");
+  } else {
+    digitalWrite(hallwayLED, LOW);
+    hallwayLightState = false;
+    Serial.println("Room is bright. Hallway light remains OFF.");
+  }
+}
+
+// Hallway light OFF function
+void turnHallwayLightOff() {
+  if (hallwayLightState == false) {
+    Serial.println("Hallway light is already OFF.");
+    return;
+  }
+
+  digitalWrite(hallwayLED, LOW);
+  hallwayLightState = false;
+  Serial.println("Hallway light turned OFF.");
+}
+
+// Fan ON function
+void turnFanOn() {
+  if (fanState == true) {
+    Serial.println("Exhaust fan output is already ON.");
+    return;
+  }
+
+  digitalWrite(fanLED, HIGH);
+  fanState = true;
+  Serial.println("Exhaust fan output turned ON.");
+}
+
+// Fan OFF function
+void turnFanOff() {
+  if (fanState == false) {
+    Serial.println("Exhaust fan output is already OFF.");
+    return;
+  }
+
+  digitalWrite(fanLED, LOW);
+  fanState = false;
+  Serial.println("Exhaust fan output turned OFF.");
+}
