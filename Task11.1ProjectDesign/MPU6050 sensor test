@@ -1,0 +1,49 @@
+#include <Wire.h>
+
+#define MPU_ADDR 0x68
+
+int16_t AccX, AccY, AccZ;
+int16_t GyroX, GyroY, GyroZ;
+
+void setup() {
+Serial.begin(9600);
+delay(2000);
+
+Wire.begin();
+
+// Wake up MPU6050
+Wire.beginTransmission(MPU_ADDR);
+Wire.write(0x6B);
+Wire.write(0x00);
+Wire.endTransmission(true);
+
+Serial.println("MPU6050 test started");
+}
+
+void loop() {
+
+Wire.beginTransmission(MPU_ADDR);
+Wire.write(0x3B);
+Wire.endTransmission(false);
+
+Wire.requestFrom(MPU_ADDR, 14, true);
+
+AccX = (Wire.read() << 8) | Wire.read();
+AccY = (Wire.read() << 8) | Wire.read();
+AccZ = (Wire.read() << 8) | Wire.read();
+
+Wire.read();
+Wire.read();
+
+GyroX = (Wire.read() << 8) | Wire.read();
+GyroY = (Wire.read() << 8) | Wire.read();
+GyroZ = (Wire.read() << 8) | Wire.read();
+
+Serial.print("AccZ: ");
+Serial.print(AccZ);
+
+Serial.print(" | GyroZ: ");
+Serial.println(GyroZ);
+
+delay(300);
+}
