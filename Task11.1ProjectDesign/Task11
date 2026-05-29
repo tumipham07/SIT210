@@ -1,0 +1,418 @@
+#include <WiFiNINA.h>
+#include <ArduinoMqttClient.h>
+#include <Wire.h>
+
+// =====================================================
+// WiFi details
+// Update these values to match your own WiFi network
+// =====================================================
+char ssid[] = "NetComm 2248";
+char pass[] = "ASHcSvdYSt377ed8";
+
+// =====================================================
+// MQTT broker details
+// The broker is running on the Raspberry Pi
+// Replace this IP address with your Raspberry Pi IP
+// =====================================================
+char broker[] = "192.168.20.211";
+int port = 1883;
+
+// MQTT username and password
+char mqttUser[] = "tumi";
+char mqttPass[] = "Tumi230307@";
+
+
+// =====================================================
+// MQTT topics used by the Arduino to publish data
+// =====================================================
+char topicGyroZ[] = "car/gyroZ";          // Swerving/rotation value
+char topicAccZ[] = "car/accZ";            // Tilt-related value
+char topicDistance[] = "car/distance";    // Front obstacle distance
+char topicAlert[] = "car/alert";          // Danger warning message
+
+// =====================================================
+// MQTT topics used by Raspberry Pi / Node-RED to control Arduino
+// These topics allow two-way communication
+// =====================================================
+char topicLedControl[] = "car/control/led";          // Remote LED warning control
+char topicBuzzerControl[] = "car/control/buzzer";    // Remote buzzer warning control
+
+// =====================================================
+// WiFi and MQTT client objects
+// =====================================================
+WiFiClient wifiClient;
+MqttClient mqttClient(wifiClient);
+
+// =====================================================
+// Hardware pin definitions
+// =====================================================
+#define MPU_ADDR 0x68
+#define TRIG_PIN 9
+#define ECHO_PIN 10
+#define BUZZER_PIN 5
+#define LED_PIN 2
+
+// =====================================================
+// Sensor value variables
+// =====================================================
+int16_t AccX, AccY, AccZ;
+int16_t GyroX, GyroY, GyroZ;
+
+// =====================================================
+// Threshold values
+// These values can be adjusted during testing
+// =====================================================
+int swerveThreshold = 7000;
+int tiltThreshold = 15000;
+int distanceThreshold = 20;
+
+// =====================================================
+// Remote warning control states
+// These values can be changed from the Node-RED dashboard
+// =====================================================
+bool ledEnabled = true;
+bool buzzerEnabled = true;
+
+// =====================================================
+// Offline buffer for fault tolerance
+// Stores danger events when MQTT connection is unavailable
+// =====================================================
+#define MAX_BUFFER 30
+String offlineEvents[MAX_BUFFER];
+int bufferCount = 0;
+
+// Reconnect timing
+unsigned long lastMqttReconnectAttempt = 0;
+const unsigned long mqttReconnectInterval = 5000;
+
+void setup() {
+  Serial.begin(9600);
+  delay(2000);
+
+  Wire.begin();
+
+  // Wake up the MPU6050 sensor
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x6B);
+  Wire.write(0x00);
+  Wire.endTransmission(true);
+
+  // Configure ultrasonic sensor pins
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  // Configure warning output pins
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  // Connect to WiFi and MQTT broker
+  connectWiFi();
+
+   // Set MQTT login and callback once
+  mqttClient.setUsernamePassword(mqttUser, mqttPass);
+  mqttClient.setId("arduino-car-monitor-01");
+  mqttClient.onMessage(onMqttMessage);
+
+  // Try MQTT once at startup
+  connectMQTTNonBlocking();
+
+  Serial.println("MQTT sensor monitoring system started");
+}
+
+void loop() {
+  // Reconnect WiFi if connection is lost
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  }
+
+  // Try MQTT reconnect every few seconds, but do not block sensor monitoring
+  if (!mqttClient.connected()) {
+    unsigned long now = millis();
+    if (now - lastMqttReconnectAttempt >= mqttReconnectInterval) {
+      lastMqttReconnectAttempt = now;
+      connectMQTTNonBlocking();
+    }
+  }
+    
+
+  // Keep MQTT connection active
+  // This also allows Arduino to receive control messages
+  if (mqttClient.connected()) {
+    mqttClient.poll();
+  }
+
+  // Read sensor values
+  readMPU();
+  int distance = getDistance();
+
+  // Keep MQTT responsive while running sensor logic
+  mqttClient.poll();
+
+  // Publish live data only when MQTT is connected
+  if (mqttClient.connected()) {
+    publishLiveData(distance);
+    sendOfflineEvents();
+    mqttClient.poll();
+  }
+
+  bool danger = false;
+  String alertMessage = "";
+
+  // Detect dangerous swerving using GyroZ
+  if (abs(GyroZ) > swerveThreshold) {
+    danger = true;
+    alertMessage += "Dangerous swerving detected! GyroZ=" + String(GyroZ) + " | ";
+  }
+
+  // Detect dangerous tilt using AccZ
+  if (AccZ < tiltThreshold) {
+    danger = true;
+    alertMessage += "Dangerous tilt detected! AccZ=" + String(AccZ) + " | ";
+  }
+
+  // Detect nearby front obstacle
+  if (distance != 999 && distance < distanceThreshold) {
+    danger = true;
+    alertMessage += "Front obstacle too close! Distance=" + String(distance) + "cm | ";
+  }
+
+  // Local warning response
+  if (danger) {
+    // LED only turns on if it is enabled from dashboard
+    if (ledEnabled) {
+      digitalWrite(LED_PIN, HIGH);
+    } else {
+      digitalWrite(LED_PIN, LOW);
+    }
+
+    // Buzzer only turns on if it is enabled from dashboard
+    if (buzzerEnabled) {
+      tone(BUZZER_PIN, 1000);
+    } else {
+      noTone(BUZZER_PIN);
+    }
+
+    // If MQTT is connected, send alert immediately.
+    // If MQTT is disconnected, save alert locally.
+    if (mqttClient.connected()) {
+        publishAlert(alertMessage);
+    } else {
+        saveOfflineEvent(alertMessage);
+    }
+
+  } else {
+    digitalWrite(LED_PIN, LOW);
+    noTone(BUZZER_PIN);
+  }
+
+  // Print values for debugging
+  Serial.print("GyroZ: ");
+  Serial.print(GyroZ);
+  Serial.print(" | AccZ: ");
+  Serial.print(AccZ);
+  Serial.print(" | Distance: ");
+  Serial.print(distance);
+  Serial.print(" | LED enabled: ");
+  Serial.println(ledEnabled);
+  Serial.print(" | Buzzer enabled: ");
+  Serial.println(buzzerEnabled);
+
+  delay(300);
+}
+
+// =====================================================
+// Connect Arduino to WiFi
+// =====================================================
+void connectWiFi() {
+  Serial.print("Connecting to WiFi");
+
+  while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
+    Serial.print(".");
+    delay(1000);
+  }
+
+  Serial.println();
+  Serial.println("WiFi connected");
+}
+
+// =====================================================
+// Connect Arduino to MQTT broker on Raspberry Pi
+// =====================================================
+// Non-blocking MQTT reconnect.
+// This only tries once and then returns to loop().
+void connectMQTTNonBlocking() {
+  Serial.println("Trying MQTT connection...");
+
+  if (mqttClient.connect(broker, port)) {
+    Serial.println("MQTT connected");
+
+    mqttClient.subscribe(topicLedControl);
+    mqttClient.subscribe(topicBuzzerControl);
+
+    Serial.println("Subscribed to LED and buzzer control topics");
+  } else {
+    Serial.println("MQTT unavailable, continuing local monitoring");
+  }
+}
+
+
+
+
+
+// =====================================================
+// Handle incoming MQTT messages from Raspberry Pi / Node-RED
+// This enables two-way communication
+// =====================================================
+void onMqttMessage(int messageSize) {
+  String topic = mqttClient.messageTopic();
+  String message = "";
+
+  while (mqttClient.available()) {
+    message += (char)mqttClient.read();
+  }
+
+  message.trim();
+
+  Serial.print("MQTT topic received: ");
+  Serial.println(topic);
+
+  Serial.print("MQTT message received: ");
+  Serial.println(message);
+
+  // Remote LED warning control
+  if (topic == String(topicLedControl)) {
+    if (message == "LED_ON") {
+      ledEnabled = true;
+      Serial.println("LED warning enabled");
+    } else if (message == "LED_OFF") {
+      ledEnabled = false;
+      digitalWrite(LED_PIN, LOW);
+      Serial.println("LED warning disabled");
+    }
+  }
+
+  // Remote buzzer warning control
+  if (topic == String(topicBuzzerControl)) {
+    if (message == "BUZZER_ON") {
+      buzzerEnabled = true;
+      Serial.println("Buzzer warning enabled");
+    } else if (message == "BUZZER_OFF") {
+      buzzerEnabled = false;
+      noTone(BUZZER_PIN);
+      Serial.println("Buzzer warning disabled");
+    }
+  }
+}
+
+// =====================================================
+// Publish live sensor values to MQTT topics
+// =====================================================
+void publishLiveData(int distance) {
+  mqttClient.beginMessage(topicGyroZ);
+  mqttClient.print(GyroZ);
+  mqttClient.endMessage();
+
+  mqttClient.beginMessage(topicAccZ);
+  mqttClient.print(AccZ);
+  mqttClient.endMessage();
+
+  mqttClient.beginMessage(topicDistance);
+  mqttClient.print(distance);
+  mqttClient.endMessage();
+}
+
+// =====================================================
+// Publish danger alert message to MQTT
+// =====================================================
+void publishAlert(String message) {
+  mqttClient.beginMessage(topicAlert);
+  mqttClient.print(message);
+  mqttClient.endMessage();
+}
+
+// =====================================================
+// Read MPU6050 accelerometer and gyroscope values
+// =====================================================
+void readMPU() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+
+  Wire.requestFrom(MPU_ADDR, 14, true);
+
+  AccX = (Wire.read() << 8) | Wire.read();
+  AccY = (Wire.read() << 8) | Wire.read();
+  AccZ = (Wire.read() << 8) | Wire.read();
+
+  // Skip temperature values
+  Wire.read();
+  Wire.read();
+
+  GyroX = (Wire.read() << 8) | Wire.read();
+  GyroY = (Wire.read() << 8) | Wire.read();
+  GyroZ = (Wire.read() << 8) | Wire.read();
+}
+
+// =====================================================
+// Read distance from ultrasonic sensor
+// 999 is returned when no valid echo is detected
+// =====================================================
+int getDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+  if (duration == 0) {
+    return 999;
+  }
+
+  int distance = duration * 0.034 / 2;
+
+  if (distance > 400 || distance < 1) {
+    return 999;
+  }
+
+  return distance;
+}
+// =====================================================
+// Save danger event locally when MQTT is disconnected
+// This helps prevent important warning events from being lost
+// =====================================================
+void saveOfflineEvent(String event) {
+  if (bufferCount < MAX_BUFFER) {
+    offlineEvents[bufferCount] = event;
+    bufferCount++;
+
+    Serial.println("Offline event saved");
+  } else {
+    Serial.println("Offline buffer full");
+  }
+}
+
+// =====================================================
+// Send saved offline events after MQTT reconnects
+// This uses a simple store-and-forward approach
+// =====================================================
+void sendOfflineEvents() {
+  if (bufferCount == 0) return;
+
+  Serial.println("Sending offline events...");
+
+  for (int i = 0; i < bufferCount; i++) {
+    mqttClient.beginMessage(topicAlert);
+    mqttClient.print("[OFFLINE EVENT] ");
+    mqttClient.print(offlineEvents[i]);
+    mqttClient.endMessage();
+
+    delay(300);
+  }
+
+  bufferCount = 0;
+  Serial.println("Offline buffer cleared");
+}
